@@ -104,10 +104,14 @@ class _RequestPageState extends State<RequestPage> {
                           IconButton(
                             icon: const Icon(Icons.send),
                             onPressed: () {
-                              context
-                                  .read<RequestCubit>()
-                                  .sendMessge(_controller.text);
-                              _controller.clear();
+                              final userMessage = _controller.text;
+                              if (userMessage.isNotEmpty) {
+                                _updateChat('User', userMessage);
+                                context
+                                    .read<RequestCubit>()
+                                    .sendMessge(userMessage);
+                                _controller.clear();
+                              }
                             },
                           ),
                         ],

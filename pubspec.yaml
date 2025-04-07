@@ -39,8 +39,8 @@ dependencies:
   # API & Data
   http: ^1.1.0
   # Voice processing
-  speech_to_text: ^6.3.0
-  flutter_tts: ^3.8.3
+  speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.2
   path_provider: any
 
 dev_dependencies:
@@ -97,4 +97,4 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 
   assets:
-    - assets/models/
+  #  - assets/models/

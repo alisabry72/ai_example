@@ -19,9 +19,6 @@ Future<void> init() async {
   sl.registerLazySingleton<RequestCubit>(
     () => RequestCubit(
       requestRemote: sl(),
-      extractInformationUseCase: sl(),
-      processSpeechUseCase: sl(),
-      submitRequestUseCase: sl(),
     ),
   );
 

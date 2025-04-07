@@ -15,8 +15,18 @@ class RequestPage extends StatefulWidget {
 
 class _RequestPageState extends State<RequestPage> {
   final List<Map<String, String>> _chatMessages = [];
-
+  final String userId = "user123"; // Replace with dynamic user ID logic
   final TextEditingController _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Add initial bot message
+    _chatMessages.add({
+      'sender': 'AI',
+      'message': 'مرحبًا! لو عايز تطلب جمع زيت، ابدأ بقول كام لتر عندك.'
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,13 +38,36 @@ class _RequestPageState extends State<RequestPage> {
             appBar: AppBar(
               title: const Text('جمع الزيت المستعمل'),
               centerTitle: true,
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: SizedBox(
+                    width: 100,
+                    height: 50,
+                    child: BlocBuilder<RequestCubit, RequestState>(
+                      buildWhen: (previous, current) =>
+                          current is RequestUpdated ||
+                          current is RequestSubmitted,
+                      builder: (context, state) {
+                        return Chip(
+                          label: Text(
+                            _getStepFromState((state is RequestUpdated)
+                                ? state.state
+                                : 'البداية'),
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          backgroundColor: Colors.green[900],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
             ),
             body: BlocConsumer<RequestCubit, RequestState>(
               listener: (context, state) {
                 if (state is RequestUpdated) {
                   _updateChat('AI', state.responseMessage ?? '');
-                } else if (state is RequestCompleted) {
-                  _displaySummary(state.request);
                 } else if (state is RequestError) {
                   _updateChat('AI', state.message);
                 } else if (state is RequestSubmitted) {
@@ -74,19 +107,6 @@ class _RequestPageState extends State<RequestPage> {
                         padding: EdgeInsets.all(16.0),
                         child: CircularProgressIndicator(),
                       ),
-                    if (state is RequestCompleted)
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ElevatedButton(
-                          onPressed: () =>
-                              context.read<RequestCubit>().submitRequest(),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('تأكيد الطلب'),
-                        ),
-                      ),
                     Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: Row(
@@ -95,22 +115,45 @@ class _RequestPageState extends State<RequestPage> {
                           Expanded(
                             child: TextField(
                               controller: _controller,
+                              textDirection: TextDirection.rtl,
                               decoration: const InputDecoration(
-                                hintText: "Enter your message",
+                                hintText: "اكتب رسالتك هنا...",
                                 border: OutlineInputBorder(),
                               ),
                             ),
                           ),
                           IconButton(
                             icon: const Icon(Icons.send),
+                            color: Colors.green[700],
                             onPressed: () {
                               final userMessage = _controller.text;
                               if (userMessage.isNotEmpty) {
                                 _updateChat('User', userMessage);
                                 context
                                     .read<RequestCubit>()
-                                    .sendMessge(userMessage);
+                                    .sendMessage(userMessage);
                                 _controller.clear();
+                              }
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              context.watch<RequestCubit>().state
+                                      is RequestListening
+                                  ? Icons.mic_off
+                                  : Icons.mic,
+                              color: context.watch<RequestCubit>().state
+                                      is RequestListening
+                                  ? Colors.red
+                                  : Colors.green[700],
+                            ),
+                            onPressed: () {
+                              final cubit = context.read<RequestCubit>();
+                              if (cubit.state is RequestListening) {
+                                cubit.stopListening();
+                              } else {
+                                cubit.startListening();
+                                _updateChat('AI', 'جاري الاستماع...');
                               }
                             },
                           ),
@@ -136,12 +179,11 @@ class _RequestPageState extends State<RequestPage> {
   void _displaySummary(Request request) {
     String summary = '''
 تفاصيل الطلب:
-الكمية: ${request.quantity}
-العنوان: ${request.address}
-تاريخ الاستلام: ${request.collectionDate}
-الهدية المختارة: ${request.giftSelection}
+الكمية: ${request.quantity ?? 'غير محدد'}
+العنوان: ${request.address ?? 'غير محدد'}
+تاريخ الاستلام: ${request.collectionDate ?? 'غير محدد'}
+الهدية المختارة: ${request.giftSelection ?? 'غير محدد'}
     ''';
-
     _updateChat('AI', summary);
   }
 }
@@ -193,5 +235,21 @@ class MessageBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+String _getStepFromState(String state) {
+  switch (state.toUpperCase()) {
+    case 'AWAITING_QUANTITY':
+      return 'تحديد الكمية';
+    case 'AWAITING_ADDRESS':
+      return 'إدخال العنوان';
+    case 'AWAITING_GIFT':
+      return 'اختيار الهدية';
+    case 'AWAITING_CONFIRMATION':
+      return 'تأكيد الطلب';
+    case 'STARTED':
+    default:
+      return 'البداية';
   }
 }

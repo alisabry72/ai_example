@@ -1,39 +1,22 @@
-import 'package:equatable/equatable.dart';
-import '../../domain/entities/request.dart';
+import 'package:oil_collection_app/domain/entities/request.dart';
 
-abstract class RequestState extends Equatable {
-  @override
-  List<Object?> get props => [];
-}
+abstract class RequestState {}
 
 class RequestInitial extends RequestState {}
 
-class RequestListening extends RequestState {}
-
 class RequestProcessing extends RequestState {}
 
+class RequestListening extends RequestState {}
+
 class RequestUpdated extends RequestState {
+  final String responseMessage;
   final Request request;
-  final String? missingField;
-  final String? responseMessage;
+  final String state;
 
-  RequestUpdated({
-    required this.request,
-    this.missingField,
-    this.responseMessage,
-  });
-
-  @override
-  List<Object?> get props => [request, missingField, responseMessage];
-}
-
-class RequestCompleted extends RequestState {
-  final Request request;
-
-  RequestCompleted(this.request);
-
-  @override
-  List<Object?> get props => [request];
+  RequestUpdated(
+      {required this.responseMessage,
+      required this.request,
+      required this.state});
 }
 
 class RequestSubmitting extends RequestState {}
@@ -44,7 +27,4 @@ class RequestError extends RequestState {
   final String message;
 
   RequestError(this.message);
-
-  @override
-  List<Object?> get props => [message];
 }

@@ -1,60 +1,130 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:get_it/get_it.dart';
+import 'package:oil_collection_app/data/services/data_predection_service.dart';
 import 'package:oil_collection_app/service/remote_request.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../domain/entities/request.dart';
-import '../../domain/usecases/extract_information_usecase.dart';
-import '../../domain/usecases/process_speech_usecase.dart';
-import '../../domain/usecases/submit_request_usecase.dart';
 import 'request_state.dart';
 
 class RequestCubit extends Cubit<RequestState> {
-  final ExtractInformationUseCase extractInformationUseCase;
   final RemoteRequest requestRemote;
-  final ProcessSpeechUseCase processSpeechUseCase;
-  final SubmitRequestUseCase submitRequestUseCase;
-
   final stt.SpeechToText _speechToText = GetIt.instance<stt.SpeechToText>();
   final FlutterTts _flutterTts = FlutterTts();
 
   Request _currentRequest = Request();
+  final String _userId =
+      "user123"; // Replace with dynamic user ID (e.g., from auth)
 
   RequestCubit({
-    required this.extractInformationUseCase,
-    required this.processSpeechUseCase,
-    required this.submitRequestUseCase,
     required this.requestRemote,
   }) : super(RequestInitial()) {
     _initSpeech();
   }
 
   Future<void> _initSpeech() async {
-    await _speechToText.initialize();
-    await _flutterTts.setLanguage('ar-SA'); // Arabic language for TTS
+    bool speechInitialized = await _speechToText.initialize(
+      onError: (error) => debugPrint('Speech init error: $error'),
+    );
+    if (!speechInitialized) {
+      emit(RequestError('فشل تهيئة التعرف على الكلام'));
+    }
+    var isLanguageAvailable = await _flutterTts.isLanguageAvailable('ar');
+    final voices = await _flutterTts.getVoices;
+    debugPrint('Available voices: $voices');
+
+    debugPrint('Is language available: $isLanguageAvailable');
+    await _flutterTts.setLanguage('ar-SA');
+    await _flutterTts.setSpeechRate(0.5); // Adjust speed if needed
+    debugPrint('Speech and TTS initialized');
   }
 
-  Future<void> sendMessge(String message) async {
+  Future<void> sendMessage(String message, {bool fromSpeech = false}) async {
+    if (message.trim().isEmpty) return;
+
     emit(RequestProcessing());
-    final response = await requestRemote.predictIntent(message);
-    emit(RequestUpdated(responseMessage: response, request: Request()));
+    debugPrint('Sending message: $message (fromSpeech: $fromSpeech)');
+
+    // Speak the user's message if it came from STT
+    if (fromSpeech) {
+      await _speak("قلت: $message"); // e.g., "قلت: السلام عليكم"
+    }
+
+    try {
+      final response =
+          await IntentPredictionService().predictIntent(message, _userId);
+      debugPrint('Backend response: ${response.toString()}');
+      final data = response['data'];
+      final intent = data['predicted_intent'];
+      final responseMessage = data['response'];
+      final state = data['state'];
+
+      // Update Request based on backend intent
+      switch (intent) {
+        case 'provide_quantity':
+          final match = RegExp(r'\d+').firstMatch(message);
+          if (match != null) {
+            _currentRequest =
+                _currentRequest.copyWith(quantity: match.group(0));
+          }
+          break;
+        case 'provide_address':
+          _currentRequest = _currentRequest.copyWith(address: message.trim());
+          break;
+        case 'choose_gift':
+          _currentRequest =
+              _currentRequest.copyWith(giftSelection: message.trim());
+          break;
+        case 'submit_order':
+          if (_currentRequest.quantity != null &&
+              _currentRequest.address != null) {
+            emit(RequestSubmitting());
+            emit(RequestSubmitted());
+            _speak(responseMessage);
+            _currentRequest = Request(); // Reset after submission
+            return;
+          } else {
+            emit(RequestError('معلومات الطلب غير مكتملة'));
+            _speak('معلومات الطلب غير مكتملة');
+            return;
+          }
+      }
+
+      emit(RequestUpdated(
+        responseMessage: responseMessage,
+        request: _currentRequest,
+        state: state,
+      ));
+      _speak(responseMessage);
+    } on Exception catch (e) {
+      debugPrint('Error in sendMessage: $e');
+      emit(RequestError(e.toString()));
+      _speak('حدث خطأ، حاول مرة أخرى');
+    }
   }
 
   Future<void> startListening() async {
-    if (_speechToText.isAvailable) {
+    if (_speechToText.isAvailable && !_speechToText.isListening) {
       emit(RequestListening());
       await _speechToText.listen(
         onResult: (result) async {
+          debugPrint('Speech result: ${result.recognizedWords}');
           if (result.finalResult) {
             String text = result.recognizedWords;
-            await processText(text);
+            debugPrint('Speech recognized: $text');
+            if (text.isNotEmpty) {
+              await sendMessage(text, fromSpeech: true); // Process spoken input
+            }
           }
         },
-        localeId: 'ar-SA', // Arabic language for STT
+        localeId: 'ar-SA',
+        onSoundLevelChange: (level) => debugPrint('Sound level: $level'),
       );
     } else {
-      emit(RequestError('Speech recognition not available'));
+      emit(RequestError('التعرف على الكلام غير متاح أو قيد التشغيل بالفعل'));
+      _speak('التعرف على الكلام غير متاح');
     }
   }
 
@@ -65,74 +135,8 @@ class RequestCubit extends Cubit<RequestState> {
     }
   }
 
-  Future<void> processText(String text) async {
-    emit(RequestProcessing());
-
-    // Extract information from text
-    final result = await extractInformationUseCase(text, _currentRequest);
-
-    result.fold((failure) => emit(RequestError(failure.message)),
-        (updatedRequest) {
-      _currentRequest = updatedRequest;
-
-      // Check what information is still missing
-      String? missingField;
-      String responseMessage;
-
-      if (_currentRequest.quantity == null) {
-        missingField = 'quantity';
-        responseMessage = 'كم كيلو من الزيت تريد أن نجمع؟';
-      } else if (_currentRequest.address == null) {
-        missingField = 'address';
-        responseMessage = 'ما هو عنوان الاستلام؟';
-      } else if (_currentRequest.collectionDate == null) {
-        missingField = 'collectionDate';
-        responseMessage = 'متى تريد أن نقوم بالاستلام؟';
-      } else if (_currentRequest.giftSelection == null) {
-        missingField = 'giftSelection';
-        responseMessage = 'ما هي الهدية التي تفضلها؟';
-      } else {
-        // All information is complete
-        responseMessage =
-            'سنقوم بجمع ${_currentRequest.quantity} كيلو من الزيت من العنوان ${_currentRequest.address} '
-            'في تاريخ ${_currentRequest.collectionDate}. وسنقدم لك هدية ${_currentRequest.giftSelection}. '
-            'هل ترغب في تأكيد الطلب؟';
-        emit(RequestCompleted(_currentRequest));
-        _speak(responseMessage);
-        return;
-      }
-
-      // Emit the updated state with missing field information
-      emit(RequestUpdated(
-        request: _currentRequest,
-        missingField: missingField,
-        responseMessage: responseMessage,
-      ));
-
-      // Speak the response to the user
-      _speak(responseMessage);
-    });
-  }
-
-  Future<void> submitRequest() async {
-    if (_currentRequest.isComplete) {
-      emit(RequestSubmitting());
-
-      final result = await submitRequestUseCase(_currentRequest);
-
-      result.fold((failure) => emit(RequestError(failure.message)), (success) {
-        emit(RequestSubmitted());
-        _speak('تم تقديم طلبك بنجاح! سنتواصل معك قريبا.');
-        // Reset the request
-        _currentRequest = Request();
-      });
-    } else {
-      emit(RequestError('لا يمكن تقديم الطلب، بعض المعلومات مفقودة'));
-      _speak('لا يمكن تقديم الطلب، بعض المعلومات مفقودة');
-    }
-  }
-
   Future<void> _speak(String text) async {
+    debugPrint('Speaking: $text');
     await _flutterTts.speak(text);
   }
 
